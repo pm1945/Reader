@@ -11,7 +11,7 @@
 </head>
 <body>
     <h2>Room Finder</h2>
-    <textarea id="inputWalls" rows="4" cols="50" placeholder="Введите массив стен, например: [[0,0,12,0], [0,0,0,8], ...]"></textarea>
+    <textarea id="inputWalls" rows="4" cols="50" placeholder="Введите массив стен, например: [[0,5,12,5], [12,5,12,0], ...]"></textarea>
     <br>
     <button onclick="findAndDrawRooms()">Найти и показать комнаты</button>
     <div id="container">
@@ -24,15 +24,41 @@
     <div id="completedWallsText"></div>
 
     <script>
+        // Функция проверки, находится ли точка внутри многоугольника (Ray Casting)
+        function isPointInsidePolygon(x, y, polygon) {
+            let inside = false;
+            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                const xi = polygon[i][0], yi = polygon[i][1];
+                const xj = polygon[j][0], yj = polygon[j][1];
+                const intersect = ((yi > y) !== (yj > y)) &&
+                    (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+
         function findAndDrawRooms() {
             const input = document.getElementById('inputWalls').value;
             let walls;
             try {
                 walls = JSON.parse(input);
+                if (!Array.isArray(walls) || !walls.every(w => Array.isArray(w) && w.length === 4)) {
+                    throw new Error("Каждая стена должна быть массивом из 4 чисел: [x1, y1, x2, y2]");
+                }
             } catch (e) {
-                document.getElementById('result').innerHTML = 'Ошибка: неверный формат ввода';
+                document.getElementById('result').innerHTML = `Ошибка: ${e.message}`;
                 return;
             }
+
+            // Сохраняем исходные стены как многоугольник для проверки
+            const originalWalls = [...walls];
+            const polygon = [];
+            originalWalls.forEach(wall => {
+                polygon.push([wall[0], wall[1]]); // Начальная точка каждой стены
+            });
+
+            // Фильтруем стены, исключая некорректные значения
+            walls = walls.filter(wall => wall.every(coord => coord !== null && coord !== undefined));
 
             // Находим границы и уникальные координаты
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -78,27 +104,37 @@
                     const y1 = yArr[j];
                     const y2 = yArr[j + 1];
 
-                    // Проверяем наличие стен для каждой ячейки
                     if (!hasHorizontalWall(x1, x2, y1)) {
-                        addedWalls.push([x1, y1, x2, y1]);
-                        hLines.push({ x1, x2, y: y1 });
+                        const newWall = [x1, y1, x2, y1];
+                        if (newWall.every(coord => coord !== null && coord !== undefined)) {
+                            addedWalls.push(newWall);
+                            hLines.push({ x1, x2, y: y1 });
+                        }
                     }
                     if (!hasHorizontalWall(x1, x2, y2)) {
-                        addedWalls.push([x1, y2, x2, y2]);
-                        hLines.push({ x1, x2, y: y2 });
+                        const newWall = [x1, y2, x2, y2];
+                        if (newWall.every(coord => coord !== null && coord !== undefined)) {
+                            addedWalls.push(newWall);
+                            hLines.push({ x1, x2, y: y2 });
+                        }
                     }
                     if (!hasVerticalWall(y1, y2, x1)) {
-                        addedWalls.push([x1, y1, x1, y2]);
-                        vLines.push({ x: x1, y1, y2 });
+                        const newWall = [x1, y1, x1, y2];
+                        if (newWall.every(coord => coord !== null && coord !== undefined)) {
+                            addedWalls.push(newWall);
+                            vLines.push({ x: x1, y1, y2 });
+                        }
                     }
                     if (!hasVerticalWall(y1, y2, x2)) {
-                        addedWalls.push([x2, y1, x2, y2]);
-                        vLines.push({ x: x2, y1, y2 });
+                        const newWall = [x2, y1, x2, y2];
+                        if (newWall.every(coord => coord !== null && coord !== undefined)) {
+                            addedWalls.push(newWall);
+                            vLines.push({ x: x2, y1, y2 });
+                        }
                     }
                 }
             }
 
-            // Добавляем новые стены в исходный массив
             walls.push(...addedWalls);
 
             // Вывод массива дополненных стен
@@ -126,7 +162,7 @@
                 return top && bottom && left && right;
             }
 
-            // Находим все комнаты
+            // Находим все комнаты и проверяем, внутри ли они исходного контура
             const rooms = [];
             const visited = new Set();
             for (let i = 0; i < vertices.length; i++) {
@@ -143,20 +179,25 @@
                     if (visited.has(key) || xMin === xMax || yMin === yMax) continue;
 
                     if (isRoom(xMin, yMin, xMax, yMax)) {
-                        const corners = [
-                            [xMin, yMin],
-                            [xMax, yMin],
-                            [xMin, yMax],
-                            [xMax, yMax]
-                        ];
-                        const width = xMax - xMin;
-                        const height = yMax - yMin;
-                        rooms.push({
-                            corners,
-                            area: width * height,
-                            perimeter: 2 * (width + height)
-                        });
-                        visited.add(key);
+                        const centerX = (xMin + xMax) / 2;
+                        const centerY = (yMin + yMax) / 2;
+                        // Проверяем, находится ли центр комнаты внутри исходного многоугольника
+                        if (isPointInsidePolygon(centerX, centerY, polygon)) {
+                            const corners = [
+                                [xMin, yMin],
+                                [xMax, yMin],
+                                [xMin, yMax],
+                                [xMax, yMax]
+                            ];
+                            const width = xMax - xMin;
+                            const height = yMax - yMin;
+                            rooms.push({
+                                corners,
+                                area: width * height,
+                                perimeter: 2 * (width + height)
+                            });
+                            visited.add(key);
+                        }
                     }
                 }
             }
@@ -172,9 +213,9 @@
             // Рисуем исходные стены черным
             ctx.strokeStyle = 'black';
             ctx.lineWidth = 2;
-            const originalWallsCount = walls.length - addedWalls.length;
+            const originalWallsCount = originalWalls.length;
             for (let i = 0; i < originalWallsCount; i++) {
-                const wall = walls[i];
+                const wall = originalWalls[i];
                 ctx.beginPath();
                 ctx.moveTo(wall[0] * scale + offsetX, wall[1] * scale + offsetY);
                 ctx.lineTo(wall[2] * scale + offsetX, wall[3] * scale + offsetY);
