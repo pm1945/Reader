@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Room Finder with Wall Completion</title>
+    <style>
+        #container { display: flex; gap: 20px; }
+        canvas { border: 1px solid black; }
+        #completedWallsText { margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h2>Room Finder</h2>
+    <textarea id="inputWalls" rows="4" cols="50" placeholder="Введите массив стен, например: [[0,0,12,0], [0,0,0,8], ...]"></textarea>
+    <br>
+    <button onclick="findAndDrawRooms()">Найти и показать комнаты</button>
+    <div id="container">
+        <div>
+            <h3>Схема с дополненными стенами:</h3>
+            <canvas id="roomCanvas" width="400" height="400"></canvas>
+        </div>
+        <div id="result"></div>
+    </div>
+    <div id="completedWallsText"></div>
+
+    <script>
+        function findAndDrawRooms() {
+            const input = document.getElementById('inputWalls').value;
+            let walls;
+            try {
+                walls = JSON.parse(input);
+            } catch (e) {
+                document.getElementById('result').innerHTML = 'Ошибка: неверный формат ввода';
+                return;
+            }
+
+            // Находим границы и уникальные координаты
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            const xCoords = new Set();
+            const yCoords = new Set();
+            walls.forEach(wall => {
+                minX = Math.min(minX, wall[0], wall[2]);
+                maxX = Math.max(maxX, wall[0], wall[2]);
+                minY = Math.min(minY, wall[1], wall[3]);
+                maxY = Math.max(maxY, wall[1], wall[3]);
+                xCoords.add(wall[0]); xCoords.add(wall[2]);
+                yCoords.add(wall[1]); yCoords.add(wall[3]);
+            });
+            const xArr = Array.from(xCoords).sort((a, b) => a - b);
+            const yArr = Array.from(yCoords).sort((a, b) => a - b);
+
+            // Разделяем стены на горизонтальные и вертикальные
+            let hLines = walls.filter(w => w[1] === w[3]).map(w => ({
+                x1: Math.min(w[0], w[2]),
+                x2: Math.max(w[0], w[2]),
+                y: w[1]
+            }));
+            let vLines = walls.filter(w => w[0] === w[2]).map(w => ({
+                y1: Math.min(w[1], w[3]),
+                y2: Math.max(w[1], w[3]),
+                x: w[0]
+            }));
+
+            // Функции проверки наличия стен
+            function hasHorizontalWall(x1, x2, y) {
+                return hLines.some(l => l.y === y && l.x1 <= x1 && l.x2 >= x2);
+            }
+            function hasVerticalWall(y1, y2, x) {
+                return vLines.some(l => l.x === x && l.y1 <= y1 && l.y2 >= y2);
+            }
+
+            // Дополняем стены для разбиения на прямоугольники
+            const addedWalls = [];
+            for (let i = 0; i < xArr.length - 1; i++) {
+                for (let j = 0; j < yArr.length - 1; j++) {
+                    const x1 = xArr[i];
+                    const x2 = xArr[i + 1];
+                    const y1 = yArr[j];
+                    const y2 = yArr[j + 1];
+
+                    // Проверяем наличие стен для каждой ячейки
+                    if (!hasHorizontalWall(x1, x2, y1)) {
+                        addedWalls.push([x1, y1, x2, y1]);
+                        hLines.push({ x1, x2, y: y1 });
+                    }
+                    if (!hasHorizontalWall(x1, x2, y2)) {
+                        addedWalls.push([x1, y2, x2, y2]);
+                        hLines.push({ x1, x2, y: y2 });
+                    }
+                    if (!hasVerticalWall(y1, y2, x1)) {
+                        addedWalls.push([x1, y1, x1, y2]);
+                        vLines.push({ x: x1, y1, y2 });
+                    }
+                    if (!hasVerticalWall(y1, y2, x2)) {
+                        addedWalls.push([x2, y1, x2, y2]);
+                        vLines.push({ x: x2, y1, y2 });
+                    }
+                }
+            }
+
+            // Добавляем новые стены в исходный массив
+            walls.push(...addedWalls);
+
+            // Вывод массива дополненных стен
+            const formattedWalls = JSON.stringify(walls).replace(/\s+/g, '');
+            document.getElementById('completedWallsText').innerHTML = 
+                `<h3>Массив стен после дополнения:</h3><pre>${formattedWalls}</pre>`;
+
+            // Находим все уникальные точки пересечения
+            const points = new Set();
+            walls.forEach(wall => {
+                points.add(`${wall[0]},${wall[1]}`);
+                points.add(`${wall[2]},${wall[3]}`);
+            });
+            const vertices = Array.from(points).map(p => {
+                const [x, y] = p.split(',').map(Number);
+                return {x, y};
+            });
+
+            // Функция проверки, является ли область комнатой
+            function isRoom(xMin, yMin, xMax, yMax) {
+                const top = hLines.some(l => l.y === yMin && l.x1 <= xMin && l.x2 >= xMax);
+                const bottom = hLines.some(l => l.y === yMax && l.x1 <= xMin && l.x2 >= xMax);
+                const left = vLines.some(l => l.x === xMin && l.y1 <= yMin && l.y2 >= yMax);
+                const right = vLines.some(l => l.x === xMax && l.y1 <= yMin && l.y2 >= yMax);
+                return top && bottom && left && right;
+            }
+
+            // Находим все комнаты
+            const rooms = [];
+            const visited = new Set();
+            for (let i = 0; i < vertices.length; i++) {
+                for (let j = 0; j < vertices.length; j++) {
+                    if (i === j) continue;
+                    const v1 = vertices[i];
+                    const v2 = vertices[j];
+                    const xMin = Math.min(v1.x, v2.x);
+                    const xMax = Math.max(v1.x, v2.x);
+                    const yMin = Math.min(v1.y, v2.y);
+                    const yMax = Math.max(v1.y, v2.y);
+
+                    const key = `${xMin},${yMin},${xMax},${yMax}`;
+                    if (visited.has(key) || xMin === xMax || yMin === yMax) continue;
+
+                    if (isRoom(xMin, yMin, xMax, yMax)) {
+                        const corners = [
+                            [xMin, yMin],
+                            [xMax, yMin],
+                            [xMin, yMax],
+                            [xMax, yMax]
+                        ];
+                        const width = xMax - xMin;
+                        const height = yMax - yMin;
+                        rooms.push({
+                            corners,
+                            area: width * height,
+                            perimeter: 2 * (width + height)
+                        });
+                        visited.add(key);
+                    }
+                }
+            }
+
+            // Визуализация
+            const canvas = document.getElementById('roomCanvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const scale = Math.min(canvas.width / (maxX - minX + 2), canvas.height / (maxY - minY + 2));
+            const offsetX = 10 - minX * scale;
+            const offsetY = 10 - minY * scale;
+
+            // Рисуем исходные стены черным
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 2;
+            const originalWallsCount = walls.length - addedWalls.length;
+            for (let i = 0; i < originalWallsCount; i++) {
+                const wall = walls[i];
+                ctx.beginPath();
+                ctx.moveTo(wall[0] * scale + offsetX, wall[1] * scale + offsetY);
+                ctx.lineTo(wall[2] * scale + offsetX, wall[3] * scale + offsetY);
+                ctx.stroke();
+            }
+
+            // Рисуем дополненные стены красным
+            ctx.strokeStyle = 'red';
+            for (let i = originalWallsCount; i < walls.length; i++) {
+                const wall = walls[i];
+                ctx.beginPath();
+                ctx.moveTo(wall[0] * scale + offsetX, wall[1] * scale + offsetY);
+                ctx.lineTo(wall[2] * scale + offsetX, wall[3] * scale + offsetY);
+                ctx.stroke();
+            }
+
+            // Рисуем комнаты
+            const colors = ['rgba(255,0,0,0.3)', 'rgba(0,255,0,0.3)', 'rgba(0,0,255,0.3)'];
+            rooms.forEach((room, index) => {
+                ctx.fillStyle = colors[index % colors.length];
+                ctx.beginPath();
+                ctx.moveTo(room.corners[0][0] * scale + offsetX, room.corners[0][1] * scale + offsetY);
+                for (let i = 1; i < room.corners.length; i++) {
+                    ctx.lineTo(room.corners[i][0] * scale + offsetX, room.corners[i][1] * scale + offsetY);
+                }
+                ctx.closePath();
+                ctx.fill();
+
+                const centerX = (room.corners[0][0] + room.corners[1][0]) / 2 * scale + offsetX;
+                const centerY = (room.corners[0][1] + room.corners[2][1]) / 2 * scale + offsetY;
+                ctx.fillStyle = 'black';
+                ctx.font = '16px Arial';
+                ctx.fillText(`${index + 1}`, centerX, centerY);
+            });
+
+            // Вывод текстовой информации о комнатах
+            let output = '<h3>Найденные комнаты:</h3>';
+            rooms.forEach((room, index) => {
+                output += `<p>Комната ${index + 1}:<br>`;
+                output += `Углы: ${JSON.stringify(room.corners)}<br>`;
+                output += `Площадь: ${room.area}<br>`;
+                output += `Периметр: ${room.perimeter}</p>`;
+            });
+            document.getElementById('result').innerHTML = output;
+        }
+    </script>
+</body>
+</html>
