@@ -37,6 +37,34 @@
             return inside;
         }
 
+        // Функция проверки, перекрывает ли сторона исходную стену
+        function hasOriginalWall(walls, x1, y1, x2, y2) {
+            return walls.some(w => {
+                if (w[1] === w[3] && y1 === y2 && w[1] === y1) { // Горизонтальная стена
+                    const wallMinX = Math.min(w[0], w[2]);
+                    const wallMaxX = Math.max(w[0], w[2]);
+                    const roomMinX = Math.min(x1, x2);
+                    const roomMaxX = Math.max(x1, x2);
+                    return wallMinX <= roomMinX && wallMaxX >= roomMaxX;
+                }
+                if (w[0] === w[2] && x1 === x2 && w[0] === x1) { // Вертикальная стена
+                    const wallMinY = Math.min(w[1], w[3]);
+                    const wallMaxY = Math.max(w[1], w[3]);
+                    const roomMinY = Math.min(y1, y2);
+                    const roomMaxY = Math.max(y1, y2);
+                    return wallMinY <= roomMinY && wallMaxY >= roomMaxY;
+                }
+                return false;
+            });
+        }
+
+        // Проверка, является ли стена дополненной
+        function isAddedWall(wall, addedWalls) {
+            return addedWalls.some(aw => 
+                aw[0] === wall[0] && aw[1] === wall[1] && aw[2] === wall[2] && aw[3] === wall[3]
+            );
+        }
+
         function findAndDrawRooms() {
             const input = document.getElementById('inputWalls').value;
             let walls;
@@ -50,17 +78,12 @@
                 return;
             }
 
-            // Сохраняем исходные стены как многоугольник для проверки
             const originalWalls = [...walls];
             const polygon = [];
-            originalWalls.forEach(wall => {
-                polygon.push([wall[0], wall[1]]); // Начальная точка каждой стены
-            });
+            originalWalls.forEach(wall => polygon.push([wall[0], wall[1]]));
 
-            // Фильтруем стены, исключая некорректные значения
             walls = walls.filter(wall => wall.every(coord => coord !== null && coord !== undefined));
 
-            // Находим границы и уникальные координаты
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
             const xCoords = new Set();
             const yCoords = new Set();
@@ -75,7 +98,6 @@
             const xArr = Array.from(xCoords).sort((a, b) => a - b);
             const yArr = Array.from(yCoords).sort((a, b) => a - b);
 
-            // Разделяем стены на горизонтальные и вертикальные
             let hLines = walls.filter(w => w[1] === w[3]).map(w => ({
                 x1: Math.min(w[0], w[2]),
                 x2: Math.max(w[0], w[2]),
@@ -87,7 +109,6 @@
                 x: w[0]
             }));
 
-            // Функции проверки наличия стен
             function hasHorizontalWall(x1, x2, y) {
                 return hLines.some(l => l.y === y && l.x1 <= x1 && l.x2 >= x2);
             }
@@ -95,7 +116,6 @@
                 return vLines.some(l => l.x === x && l.y1 <= y1 && l.y2 >= y2);
             }
 
-            // Дополняем стены для разбиения на прямоугольники
             const addedWalls = [];
             for (let i = 0; i < xArr.length - 1; i++) {
                 for (let j = 0; j < yArr.length - 1; j++) {
@@ -137,12 +157,10 @@
 
             walls.push(...addedWalls);
 
-            // Вывод массива дополненных стен
             const formattedWalls = JSON.stringify(walls).replace(/\s+/g, '');
             document.getElementById('completedWallsText').innerHTML = 
                 `<h3>Массив стен после дополнения:</h3><pre>${formattedWalls}</pre>`;
 
-            // Находим все уникальные точки пересечения
             const points = new Set();
             walls.forEach(wall => {
                 points.add(`${wall[0]},${wall[1]}`);
@@ -153,7 +171,6 @@
                 return {x, y};
             });
 
-            // Функция проверки, является ли область комнатой
             function isRoom(xMin, yMin, xMax, yMax) {
                 const top = hLines.some(l => l.y === yMin && l.x1 <= xMin && l.x2 >= xMax);
                 const bottom = hLines.some(l => l.y === yMax && l.x1 <= xMin && l.x2 >= xMax);
@@ -162,8 +179,8 @@
                 return top && bottom && left && right;
             }
 
-            // Находим все комнаты и проверяем, внутри ли они исходного контура
-            const rooms = [];
+            // Находим все прямоугольники
+            const rects = [];
             const visited = new Set();
             for (let i = 0; i < vertices.length; i++) {
                 for (let j = 0; j < vertices.length; j++) {
@@ -181,26 +198,83 @@
                     if (isRoom(xMin, yMin, xMax, yMax)) {
                         const centerX = (xMin + xMax) / 2;
                         const centerY = (yMin + yMax) / 2;
-                        // Проверяем, находится ли центр комнаты внутри исходного многоугольника
                         if (isPointInsidePolygon(centerX, centerY, polygon)) {
-                            const corners = [
-                                [xMin, yMin],
-                                [xMax, yMin],
-                                [xMin, yMax],
-                                [xMax, yMax]
-                            ];
-                            const width = xMax - xMin;
-                            const height = yMax - yMin;
-                            rooms.push({
-                                corners,
-                                area: width * height,
-                                perimeter: 2 * (width + height)
-                            });
+                            rects.push({ xMin, yMin, xMax, yMax });
                             visited.add(key);
                         }
                     }
                 }
             }
+
+            // Группируем прямоугольники в комнаты через дополненные стены
+            const groups = [];
+            const rectVisited = new Set();
+            function groupRects(startIdx) {
+                const group = [];
+                const stack = [startIdx];
+                while (stack.length > 0) {
+                    const idx = stack.pop();
+                    if (rectVisited.has(idx)) continue;
+                    rectVisited.add(idx);
+                    group.push(rects[idx]);
+
+                    for (let i = 0; i < rects.length; i++) {
+                        if (rectVisited.has(i)) continue;
+                        const r1 = rects[idx];
+                        const r2 = rects[i];
+                        if (r1.xMin === r2.xMin && r1.xMax === r2.xMax && r1.yMax === r2.yMin &&
+                            isAddedWall([r1.xMin, r1.yMax, r1.xMax, r1.yMax], addedWalls)) {
+                            stack.push(i);
+                        } else if (r1.xMin === r2.xMin && r1.xMax === r2.xMax && r1.yMin === r2.yMax &&
+                            isAddedWall([r1.xMin, r1.yMin, r1.xMax, r1.yMin], addedWalls)) {
+                            stack.push(i);
+                        } else if (r1.yMin === r2.yMin && r1.yMax === r2.yMax && r1.xMax === r2.xMin &&
+                            isAddedWall([r1.xMax, r1.yMin, r1.xMax, r1.yMax], addedWalls)) {
+                            stack.push(i);
+                        } else if (r1.yMin === r2.yMin && r1.yMax === r2.yMax && r1.xMin === r2.xMax &&
+                            isAddedWall([r1.xMin, r1.yMin, r1.xMin, r1.yMax], addedWalls)) {
+                            stack.push(i);
+                        }
+                    }
+                }
+                return group;
+            }
+
+            for (let i = 0; i < rects.length; i++) {
+                if (!rectVisited.has(i)) {
+                    const group = groupRects(i);
+                    if (group.length > 0) groups.push(group);
+                }
+            }
+
+            // Формируем комнаты с контурами и общей площадью
+            const rooms = groups.map(group => {
+                const contours = group.map(r => ({
+                    corners: [[r.xMin, r.yMin], [r.xMax, r.yMin], [r.xMin, r.yMax], [r.xMax, r.yMax]],
+                    area: (r.xMax - r.xMin) * (r.yMax - r.yMin)
+                }));
+                const totalArea = contours.reduce((sum, contour) => sum + contour.area, 0);
+                let perimeter = 0;
+                const perimeterWalls = new Set();
+
+                group.forEach(r => {
+                    const sides = [
+                        [r.xMin, r.yMin, r.xMax, r.yMin], // верх
+                        [r.xMin, r.yMax, r.xMax, r.yMax], // низ
+                        [r.xMin, r.yMin, r.xMin, r.yMax], // лево
+                        [r.xMax, r.yMin, r.xMax, r.yMax]  // право
+                    ];
+                    sides.forEach(([x1, y1, x2, y2]) => {
+                        const key = `${x1},${y1},${x2},${y2}`;
+                        if (!perimeterWalls.has(key) && hasOriginalWall(originalWalls, x1, y1, x2, y2)) {
+                            perimeterWalls.add(key);
+                            perimeter += (x1 === x2) ? Math.abs(y2 - y1) : Math.abs(x2 - x1);
+                        }
+                    });
+                });
+
+                return { contours, perimeter, totalArea };
+            });
 
             // Визуализация
             const canvas = document.getElementById('roomCanvas');
@@ -210,11 +284,9 @@
             const offsetX = 10 - minX * scale;
             const offsetY = 10 - minY * scale;
 
-            // Рисуем исходные стены черным
             ctx.strokeStyle = 'black';
             ctx.lineWidth = 2;
-            const originalWallsCount = originalWalls.length;
-            for (let i = 0; i < originalWallsCount; i++) {
+            for (let i = 0; i < originalWalls.length; i++) {
                 const wall = originalWalls[i];
                 ctx.beginPath();
                 ctx.moveTo(wall[0] * scale + offsetX, wall[1] * scale + offsetY);
@@ -222,42 +294,46 @@
                 ctx.stroke();
             }
 
-            // Рисуем дополненные стены красным
             ctx.strokeStyle = 'red';
-            for (let i = originalWallsCount; i < walls.length; i++) {
-                const wall = walls[i];
+            for (let i = 0; i < addedWalls.length; i++) {
+                const wall = addedWalls[i];
                 ctx.beginPath();
                 ctx.moveTo(wall[0] * scale + offsetX, wall[1] * scale + offsetY);
                 ctx.lineTo(wall[2] * scale + offsetX, wall[3] * scale + offsetY);
                 ctx.stroke();
             }
 
-            // Рисуем комнаты
             const colors = ['rgba(255,0,0,0.3)', 'rgba(0,255,0,0.3)', 'rgba(0,0,255,0.3)'];
             rooms.forEach((room, index) => {
-                ctx.fillStyle = colors[index % colors.length];
-                ctx.beginPath();
-                ctx.moveTo(room.corners[0][0] * scale + offsetX, room.corners[0][1] * scale + offsetY);
-                for (let i = 1; i < room.corners.length; i++) {
-                    ctx.lineTo(room.corners[i][0] * scale + offsetX, room.corners[i][1] * scale + offsetY);
-                }
-                ctx.closePath();
-                ctx.fill();
+                const color = colors[index % colors.length];
+                room.contours.forEach(contour => {
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.moveTo(contour.corners[0][0] * scale + offsetX, contour.corners[0][1] * scale + offsetY);
+                    for (let i = 1; i < contour.corners.length; i++) {
+                        ctx.lineTo(contour.corners[i][0] * scale + offsetX, contour.corners[i][1] * scale + offsetY);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
 
-                const centerX = (room.corners[0][0] + room.corners[1][0]) / 2 * scale + offsetX;
-                const centerY = (room.corners[0][1] + room.corners[2][1]) / 2 * scale + offsetY;
-                ctx.fillStyle = 'black';
-                ctx.font = '16px Arial';
-                ctx.fillText(`${index + 1}`, centerX, centerY);
+                    const centerX = (contour.corners[0][0] + contour.corners[1][0]) / 2 * scale + offsetX;
+                    const centerY = (contour.corners[0][1] + contour.corners[2][1]) / 2 * scale + offsetY;
+                    ctx.fillStyle = 'black';
+                    ctx.font = '16px Arial';
+                    ctx.fillText(`${index + 1}`, centerX, centerY);
+                });
             });
 
-            // Вывод текстовой информации о комнатах
+            // Вывод текстовой информации о комнатах с общей площадью
             let output = '<h3>Найденные комнаты:</h3>';
             rooms.forEach((room, index) => {
-                output += `<p>Комната ${index + 1}:<br>`;
-                output += `Углы: ${JSON.stringify(room.corners)}<br>`;
-                output += `Площадь: ${room.area}<br>`;
-                output += `Периметр: ${room.perimeter}</p>`;
+                room.contours.forEach((contour, cIndex) => {
+                    output += `<p>Комната ${index + 1}: Контур ${cIndex + 1}<br>`;
+                    output += `Углы: ${JSON.stringify(contour.corners)}<br>`;
+                    output += `Площадь: ${contour.area}</p>`;
+                });
+                output += `<p>Общая площадь комнаты ${index + 1}: ${room.totalArea}<br>`;
+                output += `Периметр комнаты ${index + 1}: ${room.perimeter}</p>`;
             });
             document.getElementById('result').innerHTML = output;
         }
